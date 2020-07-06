@@ -1,0 +1,116 @@
+---
+- hosts: jasonnz
+  remote_user: jason
+  become: yes
+
+  tasks:
+    - name: Test connection
+      ping:
+    - name: Update and upgrade 'apt' packages
+      apt:
+        update_cache: yes
+        state: latest
+        autoclean: yes
+        autoremove: yes
+        upgrade: yes
+    - name: Ensure we have a 'wheel' group
+      group:
+        name: wheel
+        state: present
+    - name: Allow the 'wheel' group to have passwordless sudo
+      lineinfile:
+        dest: /etc/sudoers
+        state: present
+        regexp: '^%wheel'
+        line: '%wheel ALL=(ALL) NOPASSWD: ALL'
+        validate: visudo -cf %s
+    - name: Add the user 'jason' and ensure is a member of the 'wheel' group
+      user:
+        name: jason
+        comment: Jason
+        groups: wheel
+        shell: /bin/bash
+        append: yes
+    - name: Add authorized key for jason
+      authorized_key:
+        user: jason
+        state: present
+        key: "{{ lookup('file', '/Users/jasonmorton/.ssh/jasonnz_com.pub') }}"
+    - name: Disable root login over ssh
+      lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: '^PermitRootLogin'
+        line: 'PermitRootLogin no'
+        state: present
+      notify:
+        - restart sshd
+    - name: Disable password login
+      lineinfile:
+        dest: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        state: present
+      notify:
+        - restart sshd
+    - name: Install 'UFW'
+      apt:
+        name: ufw
+        state: latest
+    - name: UFW - Setup for ssh
+      ufw:
+        rule: allow
+        name: OpenSSH
+    - name: UFW - Deny all other incoming traffic by default
+      ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+    - name: Add new 'ghostcms' user
+      user:
+        name: ghostcms
+        comment: Ghost CMS
+        groups: wheel
+        shell: /bin/bash
+        append: yes
+    - name: Create the 'ghostcms' directory with correct permissions
+      file:
+        path: /var/www/ghostcms
+        owner: ghostcms
+        state: directory
+        mode: '775'
+    - name: Install NGINX and ensure is the latest version
+      apt:
+        name: nginx
+        state: latest
+    - name: Start NGINX
+      service:
+        name: nginx
+        state: started
+    - name: UFW - Setup for HTTP/HTTPS
+      ufw:
+        rule: allow
+        name: 'Nginx Full'
+    - name: Add Node.js APT repository
+      shell:
+        cmd: curl -sL https://deb.nodesource.com/setup_12.x | sudo -E bash
+        warn: false
+    - name: Install Node.js
+      apt:
+        name: nodejs
+        state: latest
+    - name: Install Ghost-CLI
+      npm:
+        name: ghost-cli
+        global: yes
+        state: present
+    - name: Install SQlite3
+      apt:
+        name: sqlite3
+        state: latest
+
+
+  handlers:
+    - name: restart sshd
+      service:
+        name: sshd
+        state: restarted
